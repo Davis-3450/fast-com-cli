@@ -14,7 +14,7 @@ from rich.table import Table
 from rich.text import Text
 
 from . import core
-from .core import SpeedTestError
+from .core import SpeedTestError, SpeedTestResult
 
 app = typer.Typer(
     add_completion=False,
@@ -84,14 +84,14 @@ def _render_progress_bar(percentage: float, width: int = 24) -> str:
     return bar
 
 
-def _render_summary(result: dict, elapsed: float, terminal_width: int) -> Panel:
-    dl = result.get("download_mbps", 0.0)
-    ul = result.get("upload_mbps")
-    ping = result.get("latency_ms", 0)
-    loaded = result.get("loaded_latency_ms")
-    loc = result.get("client_location") or {}
-    servers = result.get("servers") or []
-    ip = result.get("client_ip", "Unknown")
+def _render_summary(result: SpeedTestResult, elapsed: float, terminal_width: int) -> Panel:
+    dl = result.download_mbps
+    ul = result.upload_mbps
+    ping = result.latency_ms
+    loaded = result.loaded_latency_ms
+    loc = result.client_location or {}
+    servers = result.servers or []
+    ip = result.client_ip or "Unknown"
 
     city = loc.get("city", "Local Node")
     country = loc.get("country", "")
@@ -422,7 +422,7 @@ def main(
         except SpeedTestError as e:
             print(json.dumps({"error": str(e)}), file=sys.stderr)
             raise typer.Exit(1)
-        print(json.dumps(result, indent=2, ensure_ascii=False))
+        print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
         return
 
     ui_state = HarnessUIState(
@@ -448,7 +448,7 @@ def main(
             transient=True,
             auto_refresh=False,
         ) as live:
-            async def orchestrate() -> dict:
+            async def orchestrate() -> SpeedTestResult:
                 async def refresh_loop():
                     while True:
                         # Dynamically adapt to current console width on every frame
