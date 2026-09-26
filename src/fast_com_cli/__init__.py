@@ -13,8 +13,8 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from . import core
-from .core import SpeedTestError, SpeedTestResult
+from fast_com_cli import core
+from fast_com_cli.core import SpeedTestError, SpeedTestResult
 
 app = typer.Typer(
     add_completion=False,
