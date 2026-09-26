@@ -1,6 +1,7 @@
 import asyncio
 import re
 import time
+from dataclasses import asdict, dataclass
 from typing import Any
 
 import httpx
@@ -15,6 +16,20 @@ UPLOAD_CHUNK = 256 * 1024
 
 class SpeedTestError(Exception):
     pass
+
+
+@dataclass
+class SpeedTestResult:
+    download_mbps: float
+    upload_mbps: float | None
+    latency_ms: int
+    loaded_latency_ms: int | None
+    client_ip: str | None
+    client_location: dict[str, Any] | None
+    servers: list[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 def _percentile(values: list[float], q: float) -> float:
@@ -70,7 +85,9 @@ async def ping(client: httpx.AsyncClient, url: str) -> float:
     return (time.perf_counter() - start) * 1000
 
 
-def _rolling_mbps(samples: list[tuple[float, float]], now: float, window: float = 1.5) -> float:
+def _rolling_mbps(
+    samples: list[tuple[float, float]], now: float, window: float = 1.5
+) -> float:
     if len(samples) < 2:
         return 0.0
     cutoff = now - window
@@ -215,7 +232,7 @@ async def run_test(
     skip_upload: bool = False,
     on_status=None,
     on_progress=None,
-) -> dict[str, Any]:
+) -> SpeedTestResult:
     def status(stage_id: str, message: str, meta: dict | None = None) -> None:
         if on_status:
             on_status(stage_id, message, meta or {})
@@ -233,7 +250,11 @@ async def run_test(
         servers = result["servers"]
         client_info = result.get("client", {})
 
-        status("ping", "Measuring baseline network latency...", {"client": client_info, "servers": servers})
+        status(
+            "ping",
+            "Measuring baseline network latency...",
+            {"client": client_info, "servers": servers},
+        )
         unloaded = []
         for s in servers[:2]:
             for _ in range(3):
@@ -242,26 +263,42 @@ async def run_test(
                 except httpx.HTTPError:
                     pass
 
-        status("download", "Streaming high-concurrency download payload...", {"client": client_info, "servers": servers})
+        status(
+            "download",
+            "Streaming high-concurrency download payload...",
+            {"client": client_info, "servers": servers},
+        )
         download_mbps, loaded = await measure_download(
             client,
             servers,
             download_duration,
-            on_progress=lambda s, now: on_progress("download", s, now) if on_progress else None,
+            on_progress=lambda s, now: on_progress("download", s, now)
+            if on_progress
+            else None,
         )
 
         upload_mbps = None
         if not skip_upload:
-            status("upload", "Executing upload throughput benchmark...", {"client": client_info, "servers": servers})
+            status(
+                "upload",
+                "Executing upload throughput benchmark...",
+                {"client": client_info, "servers": servers},
+            )
             upload_mbps = await measure_upload(
                 client,
                 servers,
                 upload_duration,
                 download_mbps,
-                on_progress=lambda s, now: on_progress("upload", s, now) if on_progress else None,
+                on_progress=lambda s, now: on_progress("upload", s, now)
+                if on_progress
+                else None,
             )
         else:
-            status("upload_skip", "Upload benchmark skipped by configuration", {"client": client_info, "servers": servers})
+            status(
+                "upload_skip",
+                "Upload benchmark skipped by configuration",
+                {"client": client_info, "servers": servers},
+            )
 
     latency = min(unloaded) if unloaded else 0.0
     loaded_latency = _percentile(loaded, 0.75) if loaded else 0.0
@@ -272,12 +309,12 @@ async def run_test(
             for s in servers
         }
     )
-    return {
-        "download_mbps": round(download_mbps, 1),
-        "upload_mbps": round(upload_mbps, 1) if upload_mbps is not None else None,
-        "latency_ms": round(latency),
-        "loaded_latency_ms": round(loaded_latency) if loaded_latency else None,
-        "client_ip": client_info.get("ip"),
-        "client_location": client_info.get("location"),
-        "servers": server_locations,
-    }
+    return SpeedTestResult(
+        download_mbps=round(download_mbps, 1),
+        upload_mbps=round(upload_mbps, 1) if upload_mbps is not None else None,
+        latency_ms=round(latency),
+        loaded_latency_ms=round(loaded_latency) if loaded_latency else None,
+        client_ip=client_info.get("ip"),
+        client_location=client_info.get("location"),
+        servers=server_locations,
+    )
